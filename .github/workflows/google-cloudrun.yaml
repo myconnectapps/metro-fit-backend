@@ -1,0 +1,62 @@
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - development
+
+env:
+  PROJECT_ID: 'trial-ge' # TODO: Replace with your Google Cloud Project ID
+  GAR_LOCATION: 'asia-southeast2'       # TODO: Replace with your Artifact Registry region
+  REPOSITORY: 'metro-fit-backend'   # TODO: Replace with your Artifact Registry repository name
+  SERVICE: 'metro-fit-backend'      # TODO: Replace with your Cloud Run service name
+  REGION: 'asia-southeast2'         # Cloud Run Region
+
+jobs:
+  deploy:
+    name: Build and Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # Authentication via Credentials JSON
+    # To use this, create a GCP Service Account with 'Cloud Run Developer' and 'Artifact Registry Writer' roles,
+    # generate a JSON key, and add it to GitHub Secrets as 'GCP_SA_KEY'.
+    - name: Google Auth
+      id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+    # Configure Docker client to authenticate with Artifact Registry
+    - name: Docker Auth
+      run: |
+        gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
+
+    # Build and Push Docker Image
+    - name: Build and Push Container
+      run: |
+        IMAGE_TAG="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}"
+        docker build -t $IMAGE_TAG .
+        docker push $IMAGE_TAG
+
+    # Deploy to Google Cloud Run
+    - name: Deploy to Cloud Run
+      id: deploy
+      uses: google-github-actions/deploy-cloudrun@v2
+      with:
+        service: ${{ env.SERVICE }}
+        region: ${{ env.REGION }}
+        image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}
+        flags: '--allow-unauthenticated'
+
+    # Output the deployed service URL
+    - name: Show Cloud Run URL
+      run: |
+        echo "Successfully deployed to: ${{ steps.deploy.outputs.url }}"
+
